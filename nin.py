@@ -20,7 +20,7 @@ class NIN(object):
 
 
 			self.global_step = tf.Variable(0, trainable=False, name='global_step')
-			self.lr = tf.train.exponential_decay(1e-2, self.global_step, 2000, 0.9, staircase=True)
+			self.lr = tf.train.exponential_decay(1e-4, self.global_step, 400*20, 0.5, staircase=True)
 
 		else:
 
@@ -37,14 +37,15 @@ class NIN(object):
 		y = mlpconv('mlpconv_layer2', y, [5, 5, 128, 192], [1, 2, 2, 1], [192, 192], is_training=is_training)
 		y = mlpconv('mlpconv_layer3', y, [3, 3, 192, 192], [1, 2, 2, 1], [192, 192], is_training=is_training)
 		#y = mlpconv('mlpconv_layer4', y, [3, 3, 192, 192], [1, 1, 1, 1], [192, 192])
-		#y = mlpconv('mlpconv_output', y, [3, 3, 192, 192], [1, 1, 1, 1], [192, 192])
+		y = mlpconv('mlpconv_output', y, [3, 3, 192, 192], [1, 1, 1, 1], [192, 10], is_training=is_training)
 		self.y = y
 
 		y_shape = y.get_shape().as_list()
-		'''
+		
 		# global averaging
 		avg_pool = tf.nn.avg_pool(y, ksize=[1, y_shape[1], y_shape[2], 1], strides=[1]*4, padding='VALID')
 		self.avg_pool = tf.squeeze(avg_pool)
+		
 		'''
 		# fc out
 		avg_pool = conv_op(y, [y_shape[1], y_shape[2], 192, 10], [1, 1, 1, 1],
@@ -53,9 +54,8 @@ class NIN(object):
 			  			   padding = 'VALID',
 			  			   wd = 0.01
 			  			   )
-		
 		self.avg_pool = tf.squeeze(avg_pool)
-	
+		'''
 		# define loss
 		cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(self.avg_pool, self.targets)
 		total_reg_loss = tf.add_n(tf.get_collection('reg_losses'), name='total_reg_loss')
@@ -111,13 +111,15 @@ class NIN(object):
 		flip_idx = np.random.permutation(x.shape[0])[:x.shape[0]/2]
 		x[flip_idx] = x[flip_idx,:,:,::-1]
 
-		'''
 		# contrastness and brightness
-		gain = 0.2 + np.random.rand(x.shape[0], 1, 1, 1)*1.6
-		#bias = np.random.randint(-20, 21, (bc_idx.shape[0], 1, 1, 1))
-		x = x * gain #+ bias
+		
+		gain = 0.5 + np.random.rand(x.shape[0], 1, 1, 1)
+		bias = np.random.randint(-30, 30, (x.shape[0], 1, 1, 1))
+		x = x * gain + bias
 		x = np.clip(x, 0.0, 255.0)
-		'''
+		
+		# whitening
+		x = self._whitening(x)
 
 		return x, y
 
@@ -129,7 +131,7 @@ class NIN(object):
 		epoch = 1
 		step = 1
 
-		for epoch in range(900):
+		for epoch in range(300):
 			
 			num_data = self.data.shape[0]
 			group_idx = np.array_split(np.random.permutation(num_data), np.ceil(num_data/128))
@@ -139,21 +141,26 @@ class NIN(object):
 				self.sess.run(self.optimize, feed_dict={self.image: x, self.targets: y})	
 				if step % 20 == 0 :
 
-					self.validate()
+					self.validate(x, y)
 					
 				step +=1
 
 			saver.save(self.sess, "./tmp/model")
 			print "---Model have been saved---"
 
-	def validate(self):
+	def validate(self, x, y):
 
 		loss, accuracy, summary = self.sess.run([self.loss, self.accuracy, self.summary_op], 
 								        		 feed_dict={self.image: self.val_data, 
 								                   			self.targets: self.val_labels})
 
+		t_loss, t_accuracy = self.sess.run([self.loss, self.accuracy],
+													   feed_dict={self.image: x,
+													   			  self.targets: y})
+
 		self.summary_writer.add_summary(summary, self.global_step.eval())
-		print "step:{0}, loss:{1}, accuracy:{2}".format(self.global_step.eval(), loss, accuracy)
+		print "step:{0}, loss: {1}, accuracy: {2}".format(self.global_step.eval(), loss, accuracy)
+		print "train: loss: {0}, accuracy: {1}".format(t_loss, t_accuracy)
 
 	def eval(self):
 		''' function for evaluating test data '''

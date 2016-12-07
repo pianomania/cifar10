@@ -9,7 +9,8 @@ is_training = True
 
 r = read_cifar10(os.getcwd()+'/cifar10_dataset', is_training=is_training)
 d, l = r.load_data()
-d = image_preprocessing(d.astype('float32'))
+
+#d = image_preprocessing(d.astype('float32'))
 
 train_dataset = {}
 val_dataset = {}
@@ -18,7 +19,7 @@ eval_dataset = {}
 if is_training is True:
 	train_dataset['data'] = d[0:49000]
 	train_dataset['labels'] = l[0:49000]
-	val_dataset['data'] = d[49000:]
+	val_dataset['data'] = image_preprocessing(d[49000:].astype('float32'))
 	val_dataset['labels'] = l[49000:]
 
 else:

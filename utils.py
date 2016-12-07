@@ -11,7 +11,7 @@ def conv_op(x, kernel_shape, stride,
 	 		use_relu = True,
 			use_batch_norm = True,
 			padding = 'SAME',
-			wd = 0.005,
+			wd = 0.01,
 			is_training=True):
 
 	''' convolution layer and ReLU activation'''
