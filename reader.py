@@ -5,27 +5,36 @@ import cPickle
 
 class read_cifar10(object):
 
-	def __init__(self, data_path=None):
+	def __init__(self, data_path=None, is_training=True):
 		self.data_path = data_path
+		self.is_training = is_training
 
 	def load_data(self):
 
 		files = os.listdir(self.data_path)
-		pattern = re.compile('(data_batch_).')
 
-		to_read = [m.group(0) for i in files for m in [pattern.search(i)] if m] 
+		if self.is_training is True:
+			pattern = re.compile('(data_batch_).')
 
-		data = []
-		labels = []
+			to_read = [m.group(0) for i in files for m in [pattern.search(i)] if m] 
 
-		for t in to_read:
-			with open(self.data_path+'/'+t, 'rb') as f:
+			data = []
+			labels = []
+
+			for t in to_read:
+				with open(self.data_path+'/'+t, 'rb') as f:
+					d = cPickle.load(f)
+					data.append(d['data'])
+					labels.append(d['labels'])
+
+			data = np.vstack(data)
+			labels = np.hstack(labels)
+
+		else:
+			with open(self.data_path+'/test_batch') as f:
 				d = cPickle.load(f)
-				data.append(d['data'])
-				labels.append(d['labels'])
-
-		data = np.vstack(data)
-		labels = np.hstack(labels)
+				data = d['data']
+				labels = d['labels']
 		
 		return data, labels
 
