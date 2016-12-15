@@ -5,117 +5,117 @@ from utils import conv_op, mlpconv
 
 class NIN(object):
 
-	def __init__(self, sess, Input=None, 
-				 max_epoch=300, 
-				 batch_size=128, 
-				 is_training=True):
+    def __init__(self, sess, Input=None, 
+                 max_epoch=300, 
+                 batch_size=128, 
+                 is_training=True):
+    
+        self.sess = sess
+        self.Input = Input
 
-		self.sess = sess
-		self.Input = Input
+        if is_training is True:
+            self.max_epoch = max_epoch
+            self.global_step = tf.Variable(0, trainable=False, name='global_step')
+            self.lr = tf.train.exponential_decay(1.0, self.global_step, 383*25, 0.5, staircase=True)
+        else:
+            pass
 
-		if is_training is True:
-			self.max_epoch = max_epoch
-			self.global_step = tf.Variable(0, trainable=False, name='global_step')
-			self.lr = tf.train.exponential_decay(1.0, self.global_step, 383*25, 0.5, staircase=True)
-		else:
-			pass
+        # define placeholder in train or eval usage
+        self.image = tf.placeholder(dtype=tf.float32, shape=[None, 32, 32, 3])
+        self.targets = tf.placeholder(dtype=tf.int64, shape=[None])
+        self.keep_prob = tf.placeholder(dtype=tf.float32, shape=[])
 
-		# define placeholder in train or eval usage
-		self.image = tf.placeholder(dtype=tf.float32, shape=[None, 32, 32, 3])
-		self.targets = tf.placeholder(dtype=tf.int64, shape=[None])
-		self.keep_prob = tf.placeholder(dtype=tf.float32, shape=[])
+        # define main architecture
+        y = mlpconv('mlpconv_layer1', self.image, [5, 5, 3, 192], [1, 2, 2, 1], [160, 96], is_training=True)
+        y = tf.nn.dropout(y, self.keep_prob)
+        y = mlpconv('mlpconv_layer2', y, [5, 5, 96, 192], [1, 2, 2, 1], [156, 128], is_training=True)
+        y = tf.nn.dropout(y, self.keep_prob)
+        #y = mlpconv('mlpconv_layer3', y, [3, 3, 128, 192], [1, 2, 2, 1], [156, 128], is_training=is_training)
+        #y = mlpconv('mlpconv_layer4', y, [3, 3, 192, 192], [1, 1, 1, 1], [192, 192])
+        y = mlpconv('mlpconv_output', y, [3, 3, 128, 192], [1, 1, 1, 1], [156, 128], is_training=True)
+        y = tf.nn.dropout(y, self.keep_prob)
+        self.y = y
 
-		# define main architecture
-		y = mlpconv('mlpconv_layer1', self.image, [5, 5, 3, 192], [1, 2, 2, 1], [160, 96], is_training=True)
-		y = tf.nn.dropout(y, self.keep_prob)
-		y = mlpconv('mlpconv_layer2', y, [5, 5, 96, 192], [1, 2, 2, 1], [156, 128], is_training=True)
-		y = tf.nn.dropout(y, self.keep_prob)
-		#y = mlpconv('mlpconv_layer3', y, [3, 3, 128, 192], [1, 2, 2, 1], [156, 128], is_training=is_training)
-		#y = mlpconv('mlpconv_layer4', y, [3, 3, 192, 192], [1, 1, 1, 1], [192, 192])
-		y = mlpconv('mlpconv_output', y, [3, 3, 128, 192], [1, 1, 1, 1], [156, 128], is_training=True)
-		y = tf.nn.dropout(y, self.keep_prob)
-		self.y = y
+        y_shape = y.get_shape().as_list()
+        
+        # global averaging
+        avg_pool = tf.nn.avg_pool(y, ksize=[1, y_shape[1], y_shape[2], 1], strides=[1]*4, padding='VALID')
+        # Version 1
+        #self.class_logits = tf.squeeze(avg_pool)
+        
+        # Version 2
+        avg_pool_shape = avg_pool.get_shape().as_list()
+        self.class_logits = conv_op(avg_pool, 
+                                    [avg_pool_shape[1], avg_pool_shape[2], avg_pool_shape[3], 10], 
+                                    stride = [1, 1, 1, 1],
+                                    use_relu = False,
+                                    use_batch_norm = False,
+                                    padding='VALID')
+        self.class_logits = tf.squeeze(avg_pool)
+        
+        # define loss
+        cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(self.class_logits, self.targets)
+        total_reg_loss = tf.add_n(tf.get_collection('reg_losses'), name='total_reg_loss')
 
-		y_shape = y.get_shape().as_list()
-		
-		# global averaging
-		avg_pool = tf.nn.avg_pool(y, ksize=[1, y_shape[1], y_shape[2], 1], strides=[1]*4, padding='VALID')
-		# Version 1
-		#self.class_logits = tf.squeeze(avg_pool)
-		
-		# Version 2
-		avg_pool_shape = avg_pool.get_shape().as_list()
-		self.class_logits = conv_op(avg_pool, 
-									[avg_pool_shape[1], avg_pool_shape[2], avg_pool_shape[3], 10], 
-									stride = [1, 1, 1, 1],
-									use_relu = False,
-									use_batch_norm = False,
-									padding='VALID')
-		self.class_logits = tf.squeeze(avg_pool)
-		
-		# define loss
-		cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(self.class_logits, self.targets)
-		total_reg_loss = tf.add_n(tf.get_collection('reg_losses'), name='total_reg_loss')
+        self.loss = tf.reduce_mean(cross_entropy) + total_reg_loss
 
-		self.loss = tf.reduce_mean(cross_entropy) + total_reg_loss
+        if is_training is True:
+            self.optimize = tf.train.MomentumOptimizer(learning_rate=self.lr, momentum=0.9).minimize(self.loss, global_step=self.global_step)
 
-		if is_training is True:
-			self.optimize = tf.train.MomentumOptimizer(learning_rate=self.lr, momentum=0.9).minimize(self.loss, global_step=self.global_step)
+        # define accuracy
+        correct_prediction = tf.equal(tf.argmax(self.class_logits, 1), self.targets)
+        self.accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
 
-		# define accuracy
-		correct_prediction = tf.equal(tf.argmax(self.class_logits, 1), self.targets)
-		self.accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
+    def summary_setting(self):
 
-	def summary_setting(self):
+        tf.scalar_summary('loss', self.loss)
+        tf.scalar_summary('accuracy', self.accuracy)
+        self.summary_op = tf.merge_all_summaries()
+        self.summary_writer = tf.train.SummaryWriter('/home/yao/cifar10/tmp/train_summary', self.sess.graph)
 
-		tf.scalar_summary('loss', self.loss)
-		tf.scalar_summary('accuracy', self.accuracy)
-		self.summary_op = tf.merge_all_summaries()
-		self.summary_writer = tf.train.SummaryWriter('/home/yao/cifar10/tmp/train_summary', self.sess.graph)
+    def train(self):
 
-	def train(self):
+        self.summary_setting()
+        saver = tf.train.Saver()
 
-		self.summary_setting()
-		saver = tf.train.Saver()
+        step = 1
 
-		step = 1
+        for epoch in range(self.max_epoch):
+            for i in range(self.Input.epoch_size):
+                x, y = self.Input.batch()
+                self.sess.run(self.optimize, feed_dict={self.image: x, 
+                                                        self.targets: y, 
+                                                        self.keep_prob: 0.75})
+                if step % 20 == 0 :
+                    self.validate(x, y) 
 
-		for epoch in range(self.max_epoch):
-			for i in range(self.Input.epoch_size):
-				x, y = self.Input.batch()
-				self.sess.run(self.optimize, feed_dict={self.image: x, 
-														self.targets: y, 
-														self.keep_prob: 0.75})
-				if step % 20 == 0 :
-					self.validate(x, y)	
+                step +=1
 
-				step +=1
+            saver.save(self.sess, "./tmp/model")
+            print "---Model have been saved---"
 
-			saver.save(self.sess, "./tmp/model")
-			print "---Model have been saved---"
+    def validate(self, x, y):
 
-	def validate(self, x, y):
+        loss, accuracy, summary = self.sess.run([self.loss, self.accuracy, self.summary_op], 
+                                                 feed_dict={self.image: self.Input.val_data, 
+                                                            self.targets: self.Input.val_labels,
+                                                            self.keep_prob: 1.0})
 
-		loss, accuracy, summary = self.sess.run([self.loss, self.accuracy, self.summary_op], 
-								        		 feed_dict={self.image: self.Input.val_data, 
-								                   			self.targets: self.Input.val_labels,
-								                   			self.keep_prob: 1.0})
+        t_loss, t_accuracy = self.sess.run([self.loss, self.accuracy],
+                                                       feed_dict={self.image: x,
+                                                                  self.targets: y,
+                                                                  self.keep_prob: 1.0})
 
-		t_loss, t_accuracy = self.sess.run([self.loss, self.accuracy],
-													   feed_dict={self.image: x,
-													   			  self.targets: y,
-													   			  self.keep_prob: 1.0})
+        self.summary_writer.add_summary(summary, self.global_step.eval())
+        print "step:{0}, loss: {1}, accuracy: {2}".format(self.global_step.eval(), loss, accuracy)
+        print "train: loss: {0}, accuracy: {1}".format(t_loss, t_accuracy)
 
-		self.summary_writer.add_summary(summary, self.global_step.eval())
-		print "step:{0}, loss: {1}, accuracy: {2}".format(self.global_step.eval(), loss, accuracy)
-		print "train: loss: {0}, accuracy: {1}".format(t_loss, t_accuracy)
+    def eval(self):
+        ''' function for evaluating test data '''
 
-	def eval(self):
-		''' function for evaluating test data '''
+        accuracy = self.sess.run(self.accuracy, 
+                                  feed_dict={self.image: self.Input.eval_data, 
+                                             self.targets: self.Input.eval_labels,
+                                             self.keep_prob: 1.0})
 
-		accuracy = self.sess.run(self.accuracy, 
-								  feed_dict={self.image: self.Input.eval_data, 
-								             self.targets: self.Input.eval_labels,
-								             self.keep_prob: 1.0})
-
-		print "accuracy %f" % accuracy
+        print "accuracy %f" % accuracy
