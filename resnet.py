@@ -1,53 +1,66 @@
 import numpy as np
 import tensorflow as tf
-from utils import conv_op, mlpconv
+from utils import res_op, conv_op
 
-
-class NIN(object):
+class ResNet(object):
 
   def __init__(self, sess, Input=None, 
          max_epoch=300, 
          batch_size=128, 
-         is_training=True):
+         is_training=True,
+         pre_activation=True):
   
     self.sess = sess
     self.Input = Input
+    self.nstack = 3
     
     self.max_epoch = max_epoch
     self.global_step = tf.Variable(0, trainable=False, name='global_step')
-    self.lr = tf.train.exponential_decay(1.0, self.global_step, 383*25, 0.5, staircase=True)
+    #self.lr = tf.train.exponential_decay(0.1, self.global_step, 383*80, 0.1, staircase=True)
+    self.lr = tf.train.piecewise_constant(self.global_step, [32000, 48000], [0.1, 0.01, 0.005])
+    #self.lr = tf.train.polynomial_decay(0.1, self.global_step, 48000, 0.001)
 
     # define placeholder in train or eval usage
     self.image = tf.placeholder(dtype=tf.float32, shape=[None, 32, 32, 3])
     self.targets = tf.placeholder(dtype=tf.int64, shape=[None])
-    self.keep_prob = tf.placeholder(dtype=tf.float32, shape=[])
-
-    # define main architecture
-    y = mlpconv('mlpconv_layer1', self.image, [5, 5, 3, 192], [1, 2, 2, 1], [160, 96], is_training=True)
-    y = tf.nn.dropout(y, self.keep_prob)
-    y = mlpconv('mlpconv_layer2', y, [5, 5, 96, 192], [1, 2, 2, 1], [156, 128], is_training=True)
-    y = tf.nn.dropout(y, self.keep_prob)
-    y = mlpconv('mlpconv_output', y, [3, 3, 128, 192], [1, 1, 1, 1], [156, 128], is_training=True)
-    y = tf.nn.dropout(y, self.keep_prob)
-    self.y = y
-
-    y_shape = y.get_shape().as_list()
     
-    # global averaging
-    avg_pool = tf.nn.avg_pool(y, ksize=[1, y_shape[1], y_shape[2], 1], strides=[1]*4, padding='VALID')
-    # Version 1
-    #self.class_logits = tf.squeeze(avg_pool)
-    
-    # Version 2
-    #avg_pool_shape = avg_pool.get_shape().as_list()
-    self.class_logits = conv_op('output', avg_pool, 
-                  [1, 1, 128, 10], 
+    res = conv_op('conv1', self.image, [3, 3, 3, 16], [1]*4,
+                  wd = 0.0001,
+                  is_training = is_training,
+                  w_initializer = tf.truncated_normal_initializer(mean=0.0, 
+                                                                  stddev=np.sqrt(2.0/27)))
+
+    res = res_op('res1_0', res, [3, 3, 16 ,16], 1, pre_activation=False)
+
+    for i in xrange(1, self.nstack):
+      res = res_op('res1_%d' % i, res, [3, 3, 16, 16], 1)
+
+    for i in xrange(0, self.nstack):
+      res = res_op('res2_%d' % i, res, [3, 3, i==0 and 16 or 32, 32], i==1 and 2 or 1)
+
+    for i in xrange(0, self.nstack):
+      res = res_op('res3_%d' % i, res, [3, 3, i==0 and 32 or 64, 64], i==1 and 2 or 1)
+
+    with tf.variable_scope('avg_pool'):
+      #res = tf.contrib.layers.batch_norm(res, is_training=is_training)
+      res = tf.nn.relu(res)
+      
+      res_shape = res.get_shape().as_list()
+      avg_pool = tf.nn.avg_pool(res, 
+                                ksize=[1, res_shape[1], res_shape[2], 1], 
+                                strides=[1]*4, 
+                                padding='VALID')
+
+    # = avg_pool.get_shape().as_list()
+    class_logits = conv_op('output', avg_pool, 
+                  [1, 1, 64, 10],
                   stride = [1, 1, 1, 1],
                   use_relu = False,
                   use_batch_norm = False,
+                  wd = 0.0001,
                   padding='VALID')
-    self.class_logits = tf.squeeze(self.class_logits)
-    
+    self.class_logits = tf.squeeze(class_logits)
+
     # define loss
     cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(self.class_logits, self.targets)
     total_reg_loss = tf.add_n(tf.get_collection('reg_losses'), name='total_reg_loss')
@@ -57,7 +70,6 @@ class NIN(object):
     self.optimize = tf.train.MomentumOptimizer(learning_rate=self.lr, momentum=0.9)
     self.train_op = self.optimize.minimize(self.loss, global_step=self.global_step)
 
-    # define accuracy
     correct_prediction = tf.equal(tf.argmax(self.class_logits, 1), self.targets)
     self.accuracy = tf.reduce_mean(tf.cast(correct_prediction, "float"))
 
@@ -80,8 +92,7 @@ class NIN(object):
         x, y = self.Input.batch()
         self.sess.run(self.train_op, 
                       feed_dict={self.image: x, 
-                                 self.targets: y,
-                                 self.keep_prob: 0.75})
+                                 self.targets: y})
         if step % 20 == 0:
           self.validate(x, y) 
 
@@ -94,13 +105,11 @@ class NIN(object):
 
     loss, accuracy, summary = self.sess.run([self.loss, self.accuracy, self.summary_op], 
                                             feed_dict={self.image: self.Input.val_data, 
-                                                       self.targets: self.Input.val_labels,
-                                                       self.keep_prob: 1.0})
+                                                       self.targets: self.Input.val_labels})
 
     t_loss, t_accuracy = self.sess.run([self.loss, self.accuracy],
                                        feed_dict={self.image: x,
-                                                  self.targets: y,
-                                                  self.keep_prob: 1.0})
+                                                  self.targets: y})
 
     self.summary_writer.add_summary(summary, self.global_step.eval())
     print "step:{0}, loss: {1}, accuracy: {2}".format(self.global_step.eval(), loss, accuracy)
@@ -111,8 +120,7 @@ class NIN(object):
 
     accuracy = self.sess.run(self.accuracy, 
                              feed_dict={self.image: self.Input.eval_data, 
-                             self.targets: self.Input.eval_labels,
-                             self.keep_prob: 1.0})
+                             self.targets: self.Input.eval_labels})
 
     print "accuracy %f" % accuracy
 
