@@ -17,7 +17,7 @@ class ResNet(object):
     self.max_epoch = max_epoch
     self.global_step = tf.Variable(0, trainable=False, name='global_step')
     #self.lr = tf.train.exponential_decay(0.1, self.global_step, 383*80, 0.1, staircase=True)
-    self.lr = tf.train.piecewise_constant(self.global_step, [32000, 48000], [0.1, 0.01, 0.005])
+    self.lr = tf.train.piecewise_constant(self.global_step, [32000, 48000], [0.1, 0.01, 0.001])
     #self.lr = tf.train.polynomial_decay(0.1, self.global_step, 48000, 0.001)
 
     # define placeholder in train or eval usage
@@ -25,10 +25,8 @@ class ResNet(object):
     self.targets = tf.placeholder(dtype=tf.int64, shape=[None])
     
     res = conv_op('conv1', self.image, [3, 3, 3, 16], [1]*4,
-                  wd = 0.0001,
-                  is_training = is_training,
-                  w_initializer = tf.truncated_normal_initializer(mean=0.0, 
-                                                                  stddev=np.sqrt(2.0/27)))
+                  wd=0.0001,
+                  is_training=is_training)
 
     res = res_op('res1_0', res, [3, 3, 16 ,16], 1, pre_activation=False)
 
@@ -42,7 +40,7 @@ class ResNet(object):
       res = res_op('res3_%d' % i, res, [3, 3, i==0 and 32 or 64, 64], i==1 and 2 or 1)
 
     with tf.variable_scope('avg_pool'):
-      #res = tf.contrib.layers.batch_norm(res, is_training=is_training)
+      res = tf.contrib.layers.batch_norm(res, is_training=is_training)
       res = tf.nn.relu(res)
       
       res_shape = res.get_shape().as_list()
@@ -51,7 +49,6 @@ class ResNet(object):
                                 strides=[1]*4, 
                                 padding='VALID')
 
-    # = avg_pool.get_shape().as_list()
     class_logits = conv_op('output', avg_pool, 
                   [1, 1, 64, 10],
                   stride = [1, 1, 1, 1],

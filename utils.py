@@ -1,9 +1,8 @@
 import numpy as np
 import tensorflow as tf
 
-const_init = tf.constant_initializer(0.0)
-xavier_init_conv2d = tf.contrib.layers.xavier_initializer_conv2d()
-trunc_gau_init = tf.truncated_normal_initializer(mean=0.0, stddev=0.01)
+const_init = tf.constant_initializer
+w_init = tf.contrib.layers.variance_scaling_initializer
 
 def conv_op(name, x, kernel_shape, stride,
             padding='SAME',
@@ -12,7 +11,7 @@ def conv_op(name, x, kernel_shape, stride,
             use_batch_norm=True,
             wd=0.0001,
             is_training=True,
-            w_initializer=trunc_gau_init):
+            w_initializer=w_init(mode='FAN_OUT')):
 
   with tf.variable_scope(name):
     kernel = tf.get_variable(name='W', 
@@ -20,11 +19,11 @@ def conv_op(name, x, kernel_shape, stride,
                              initializer=w_initializer)
 
     conv = tf.nn.conv2d(x, kernel, stride, padding=padding)
-    bias = tf.get_variable(name='b', shape=[kernel_shape[-1]], initializer=const_init)
+    bias = tf.get_variable(name='b', shape=[kernel_shape[-1]], initializer=const_init(0.0))
     out = tf.nn.bias_add(conv, bias)
 
     if use_batch_norm is True:
-      out = tf.contrib.layers.batch_norm(out, is_training=is_training)
+      out = tf.contrib.layers.batch_norm(out, is_training=False)
 
     if use_relu is True:
       out = tf.nn.relu(out)
@@ -43,13 +42,11 @@ def mlpconv(name, x, kernel_shape, stride, layers, is_training):
   with tf.variable_scope(name):
     conv = conv_op('layer1', x, kernel_shape, stride, is_training=is_training)
 
-  with tf.variable_scope(name):
     conv = conv_op('layer2', conv,
                    [1 ,1, kernel_shape[-1], layers[0]],
                    [1, 1, 1, 1],
                    is_training=is_training)
 
-  with tf.variable_scope(name):
     conv = conv_op('layer3', conv, 
                    [1, 1, layers[0],
                    layers[1]], [1, 1, 1, 1],
@@ -67,29 +64,25 @@ def res_op(name, x, kernel_shape, stride,
       x = tf.contrib.layers.batch_norm(x, is_training=is_training)
       x = tf.nn.relu(x)
 
-  kw, kh, kd, ko = tuple(kernel_shape)
-  stddev1 = np.sqrt(2.0 / (kw*kh*kd))
-  stddev2 = np.sqrt(2.0 / (kw*kh*ko))
-
   with tf.variable_scope(name+'/residual'):
+    kw, kh, ki, ko = tuple(kernel_shape)
+
     x = conv_op('map1', x, kernel_shape, [1, stride, stride, 1],
                    wd=0.0001,
-                   is_training=is_training,
-                   w_initializer=tf.truncated_normal_initializer(stddev=stddev1))
+                   is_training=is_training)
 
 
     x = conv_op('map2', x, [kw, kh, ko, ko], [1]*4,
                 use_relu=False,
                 use_batch_norm=False,
                 wd=0.0001,
-                is_training=is_training,
-                w_initializer=tf.truncated_normal_initializer(stddev=stddev2))
+                is_training=is_training)
 
   with tf.variable_scope(name+'/identity'):
     origin_x_shape = origin_x.get_shape().as_list()
     if stride != 1:
       identity = tf.nn.avg_pool(origin_x, 
-                                [1, stride, stride, 1],
+                                [1, 1, 1, 1],
                                 [1, stride, stride, 1],
                                 padding='VALID') 
     else:
@@ -114,7 +107,7 @@ def prelu(x):
   with tf.variable_scope('prelu'):
     a = tf.get_variable(name='P',
                         shape=[],
-                        initializer=tf.constant_initializer(0.25))
+                        initializer=const_init(0.25))
     out = tf.maximum(x, 0.0) + tf.scalar_mul(a, tf.minimum(0.0, x))
 
   return out

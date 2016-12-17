@@ -15,7 +15,7 @@ class NIN(object):
     
     self.max_epoch = max_epoch
     self.global_step = tf.Variable(0, trainable=False, name='global_step')
-    self.lr = tf.train.exponential_decay(1.0, self.global_step, 383*25, 0.5, staircase=True)
+    self.lr = tf.train.exponential_decay(0.1, self.global_step, 383*50, 0.5, staircase=True)
 
     # define placeholder in train or eval usage
     self.image = tf.placeholder(dtype=tf.float32, shape=[None, 32, 32, 3])
@@ -23,11 +23,11 @@ class NIN(object):
     self.keep_prob = tf.placeholder(dtype=tf.float32, shape=[])
 
     # define main architecture
-    y = mlpconv('mlpconv_layer1', self.image, [5, 5, 3, 192], [1, 2, 2, 1], [160, 96], is_training=True)
+    y = mlpconv('mlpconv_layer1', self.image, [5, 5, 3, 192], [1, 2, 2, 1], [160, 96], is_training=is_training)
     y = tf.nn.dropout(y, self.keep_prob)
-    y = mlpconv('mlpconv_layer2', y, [5, 5, 96, 192], [1, 2, 2, 1], [156, 128], is_training=True)
+    y = mlpconv('mlpconv_layer2', y, [5, 5, 96, 192], [1, 2, 2, 1], [156, 128], is_training=is_training)
     y = tf.nn.dropout(y, self.keep_prob)
-    y = mlpconv('mlpconv_output', y, [3, 3, 128, 192], [1, 1, 1, 1], [156, 128], is_training=True)
+    y = mlpconv('mlpconv_output', y, [3, 3, 128, 192], [1, 1, 1, 1], [156, 128], is_training=is_training)
     y = tf.nn.dropout(y, self.keep_prob)
     self.y = y
 

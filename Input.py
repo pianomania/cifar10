@@ -19,7 +19,6 @@ class Input(object):
       self.val_data = d[49000:].astype('float32').reshape(-1, 32, 32, 3)
       self.val_data = self._whitening(self.val_data)
       self.val_labels = l[49000:]
-
       self.num_data = self.train_data.shape[0]
       self.epoch_size = np.ceil(self.num_data/float(batch_num)).astype('int32')
 
@@ -46,6 +45,7 @@ class Input(object):
     '''
     for i in xrange(x.shape[0]):
       x[i] = self._random_crop(x[i])
+  
     # random fliping image
     flip_idx = np.random.permutation(x.shape[0])[:x.shape[0]/2]
     x[flip_idx] = x[flip_idx,:,::-1,:]
