@@ -43,8 +43,6 @@ class NIN(object):
     self.class_logits = conv_op('output', avg_pool, 
                   [1, 1, 128, 10], 
                   stride = [1, 1, 1, 1],
-                  use_relu = False,
-                  use_batch_norm = False,
                   padding='VALID')
     self.class_logits = tf.squeeze(self.class_logits)
     

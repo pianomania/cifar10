@@ -14,11 +14,17 @@ class Input(object):
 
     if self.is_training  is True:
 
-      self.train_data = d[0:49000].astype('float32').reshape(-1, 32, 32, 3)
-      self.train_labels = l[0:49000]
+      self.train_data = d[:49000].astype('float32').reshape(-1, 32, 32, 3)
+      self.train_labels = l[:49000]
       self.val_data = d[49000:].astype('float32').reshape(-1, 32, 32, 3)
       self.val_data = self._whitening(self.val_data)
       self.val_labels = l[49000:]
+      #self.val_data = d[:100].astype('float32').reshape(-1, 32, 32, 3)
+      #self.val_data = self._whitening(self.val_data)
+      #self.val_labels = l[:100]
+      #self.train_data = d[:100].astype('float32').reshape(-1, 32, 32, 3)
+      #self.train_data = self._whitening(self.val_data)
+      #self.train_labels = l[:100]     
       self.num_data = self.train_data.shape[0]
       self.epoch_size = np.ceil(self.num_data/float(batch_num)).astype('int32')
 
@@ -30,8 +36,8 @@ class Input(object):
 
   def _whitening(self, x):
 
-    x -= np.mean(x, axis=0)
-    x /= np.std(x, axis=0)
+    x -= np.mean(x, axis=(0,1,2))
+    x /= np.std(x, axis=(0,1,2))
 
     return x
 
@@ -45,16 +51,18 @@ class Input(object):
     '''
     for i in xrange(x.shape[0]):
       x[i] = self._random_crop(x[i])
-  
+    
     # random fliping image
     flip_idx = np.random.permutation(x.shape[0])[:x.shape[0]/2]
     x[flip_idx] = x[flip_idx,:,::-1,:]
+    '''
     # contrastness and brightness
     gain = 0.5 + np.random.rand(x.shape[0], 1, 1, 1)
     bias = np.random.randint(-50, 50, (x.shape[0], 1, 1, 1))
     x = x * gain + bias
     x = np.clip(x, 0.0, 255.0)
     # whitening
+    '''
     x = self._whitening(x)
 
     return x
@@ -80,8 +88,8 @@ class Input(object):
 
   def _random_crop(self, x):
 
-    xx = np.random.randint(9)
-    yy = np.random.randint(9)
-    x = np.pad(x, ((4,),(4,),(0,)), 'constant')[xx:xx+32, yy:yy+32, :]
+    xx = np.random.randint(5)
+    yy = np.random.randint(5)
+    x = np.pad(x, ((2,),(2,),(0,)), 'constant')[xx:xx+32, yy:yy+32, :]
 
     return x

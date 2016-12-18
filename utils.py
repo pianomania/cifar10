@@ -3,15 +3,13 @@ import tensorflow as tf
 
 const_init = tf.constant_initializer
 w_init = tf.contrib.layers.variance_scaling_initializer
+batch_norm = tf.contrib.layers.batch_norm
 
 def conv_op(name, x, kernel_shape, stride,
             padding='SAME',
-            use_dropout=(False, None), # 2nd for placeholder of keep_prob
-            use_relu=True,
-            use_batch_norm=True,
             wd=0.0001,
-            is_training=True,
-            w_initializer=w_init(mode='FAN_OUT')):
+            w_initializer=w_init(mode='FAN_OUT'),
+            b_initializer=const_init(0.0)):
 
   with tf.variable_scope(name):
     kernel = tf.get_variable(name='W', 
@@ -19,17 +17,12 @@ def conv_op(name, x, kernel_shape, stride,
                              initializer=w_initializer)
 
     conv = tf.nn.conv2d(x, kernel, stride, padding=padding)
-    bias = tf.get_variable(name='b', shape=[kernel_shape[-1]], initializer=const_init(0.0))
-    out = tf.nn.bias_add(conv, bias)
 
-    if use_batch_norm is True:
-      out = tf.contrib.layers.batch_norm(out, is_training=False)
-
-    if use_relu is True:
-      out = tf.nn.relu(out)
-
-    if use_dropout[0] is True:
-      out = tf.nn.dropout(out, use_dropout[1])
+    if b_initializer==None:
+      out = conv
+    else:
+      bias = tf.get_variable(name='b', shape=[kernel_shape[-1]], initializer=b_initializer)
+      out = tf.nn.bias_add(conv, bias)
 
     if wd is not None:
       weight_decay = tf.mul(tf.nn.l2_loss(kernel), wd, name='weight_loss')
@@ -40,17 +33,24 @@ def conv_op(name, x, kernel_shape, stride,
 def mlpconv(name, x, kernel_shape, stride, layers, is_training):
 
   with tf.variable_scope(name):
-    conv = conv_op('layer1', x, kernel_shape, stride, is_training=is_training)
+    conv = conv_op('layer1', x, kernel_shape, stride, 
+                   b_initializer=None)
+
+    conv = bnrelu('bnrelu_1', conv, is_training)
 
     conv = conv_op('layer2', conv,
                    [1 ,1, kernel_shape[-1], layers[0]],
                    [1, 1, 1, 1],
-                   is_training=is_training)
+                   b_initializer=None)
+
+    conv = bnrelu('bnrelu_1',conv, is_training)
 
     conv = conv_op('layer3', conv, 
                    [1, 1, layers[0],
                    layers[1]], [1, 1, 1, 1],
-                   is_training=is_training)
+                   b_initializer=None)
+
+    conv = bnrelu('bnrelu', conv, is_training)
 
   return conv
 
@@ -59,24 +59,21 @@ def res_op(name, x, kernel_shape, stride,
            is_training=True):
 
   origin_x = x
-  if pre_activation is True:
-    with tf.variable_scope(name+'/pre_activation'):
-      x = tf.contrib.layers.batch_norm(x, is_training=is_training)
-      x = tf.nn.relu(x)
+
+  with tf.variable_scope(name):
+    if pre_activation is True:
+      x = bnrelu('bnrelu_1', x, is_training)
 
   with tf.variable_scope(name+'/residual'):
     kw, kh, ki, ko = tuple(kernel_shape)
 
-    x = conv_op('map1', x, kernel_shape, [1, stride, stride, 1],
-                   wd=0.0001,
-                   is_training=is_training)
-
-
+    x = conv_op('map1', x, kernel_shape, [1, stride, stride, 1], 
+                wd=0.00001,
+                b_initializer=None)
+    x = bnrelu('bnrelu_2', x, is_training)
     x = conv_op('map2', x, [kw, kh, ko, ko], [1]*4,
-                use_relu=False,
-                use_batch_norm=False,
-                wd=0.0001,
-                is_training=is_training)
+                wd=0.00001,
+                b_initializer=None)
 
   with tf.variable_scope(name+'/identity'):
     origin_x_shape = origin_x.get_shape().as_list()
@@ -111,3 +108,11 @@ def prelu(x):
     out = tf.maximum(x, 0.0) + tf.scalar_mul(a, tf.minimum(0.0, x))
 
   return out
+
+def bnrelu(name, x, is_training=True, scale=True):
+
+  with tf.variable_scope(name):
+    x = batch_norm(x, scale=True, is_training=is_training)
+    x = tf.nn.relu(x)
+
+  return x
