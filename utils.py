@@ -3,25 +3,29 @@ import tensorflow as tf
 
 const_init = tf.constant_initializer
 w_init = tf.contrib.layers.variance_scaling_initializer
+w_init2 = tf.truncated_normal_initializer
 batch_norm = tf.contrib.layers.batch_norm
 
-def conv_op(name, x, kernel_shape, stride,
+def conv_op(name, x, outChannel, kw, kh, dw=1, dh=1, 
             padding='SAME',
             wd=0.0001,
             w_initializer=w_init(mode='FAN_OUT'),
             b_initializer=const_init(0.0)):
-
+  
   with tf.variable_scope(name):
+    inChannel = x.get_shape().as_list()[3]
     kernel = tf.get_variable(name='W', 
-                             shape=kernel_shape, # e.x. [8, 8, 4, 16], 
+                             shape=[kw, kh, inChannel, outChannel],
                              initializer=w_initializer)
 
-    conv = tf.nn.conv2d(x, kernel, stride, padding=padding)
+    conv = tf.nn.conv2d(x, kernel, [1, dw, dh, 1], padding=padding)
 
     if b_initializer==None:
       out = conv
     else:
-      bias = tf.get_variable(name='b', shape=[kernel_shape[-1]], initializer=b_initializer)
+      bias = tf.get_variable(name='b',
+                             shape=[outChannel],
+                             initializer=b_initializer)
       out = tf.nn.bias_add(conv, bias)
 
     if wd is not None:
@@ -30,70 +34,64 @@ def conv_op(name, x, kernel_shape, stride,
 
     return out
 
-def mlpconv(name, x, kernel_shape, stride, layers, is_training):
+def mlpconv(name, x, outChannel, kw, kh, dw=1, dh=1, is_training=True):
 
   with tf.variable_scope(name):
-    conv = conv_op('layer1', x, kernel_shape, stride, 
+    conv = conv_op('layer1', x, outChannel[0], kw, kh, dw, dh, 
                    b_initializer=None)
 
     conv = bnrelu('bnrelu_1', conv, is_training)
 
-    conv = conv_op('layer2', conv,
-                   [1 ,1, kernel_shape[-1], layers[0]],
-                   [1, 1, 1, 1],
+    conv = conv_op('layer2', conv, outChannel[1], 1, 1, 
+                    b_initializer=None)
+    
+    conv = bnrelu('bnrelu_2',conv, is_training)
+
+    conv = conv_op('layer3', conv, outChannel[2], 1, 1,
                    b_initializer=None)
 
-    conv = bnrelu('bnrelu_1',conv, is_training)
-
-    conv = conv_op('layer3', conv, 
-                   [1, 1, layers[0],
-                   layers[1]], [1, 1, 1, 1],
-                   b_initializer=None)
-
-    conv = bnrelu('bnrelu', conv, is_training)
+    conv = bnrelu('bnrelu_3', conv, is_training)
 
   return conv
 
-def res_op(name, x, kernel_shape, stride, 
+def res_op(name, x, outChannel, kw, kh, d, 
            pre_activation=True,
            is_training=True):
 
   origin_x = x
 
-  with tf.variable_scope(name):
+  with tf.variable_scope(name+'/residual'):
+
     if pre_activation is True:
       x = bnrelu('bnrelu_1', x, is_training)
 
-  with tf.variable_scope(name+'/residual'):
-    kw, kh, ki, ko = tuple(kernel_shape)
-
-    x = conv_op('map1', x, kernel_shape, [1, stride, stride, 1], 
-                wd=0.00001,
+    x = conv_op('map1', x, outChannel, kw, kh, d, d,
                 b_initializer=None)
+
     x = bnrelu('bnrelu_2', x, is_training)
-    x = conv_op('map2', x, [kw, kh, ko, ko], [1]*4,
-                wd=0.00001,
+
+    x = conv_op('map2', x, outChannel, kw, kh,
                 b_initializer=None)
 
   with tf.variable_scope(name+'/identity'):
-    origin_x_shape = origin_x.get_shape().as_list()
-    if stride != 1:
+    inChannel = origin_x.get_shape().as_list()[-1]
+    if d != 1:
       identity = tf.nn.avg_pool(origin_x, 
                                 [1, 1, 1, 1],
-                                [1, stride, stride, 1],
+                                [1, d, d, 1],
                                 padding='VALID') 
     else:
       identity = origin_x
 
-    if kernel_shape[-1] != origin_x_shape[-1]:
-      identity_depth = identity.get_shape().as_list()[-1]
-      x_depth = x.get_shape().as_list()[-1]
+    if outChannel != inChannel:
+      identityChannel = identity.get_shape().as_list()[-1]
+      xChannel = x.get_shape().as_list()[-1]
 
-      dp = (x_depth - identity_depth)/2.0
-      dp0 = np.ceil(dp).astype('int32')
-      dp1 = np.floor(dp).astype('int32')
+      dp = (xChannel - identityChannel)
+      #dp0 = np.ceil(dp).astype('int32')
+      #dp1 = np.floor(dp).astype('int32')
 
-      identity = tf.pad(identity, [[0, 0], [0, 0], [0, 0], [dp0, dp1]])
+      identity = tf.pad(identity, [[0, 0], [0, 0], [0, 0], [dp, 0]])
 
     out = tf.add(x, identity)
 
@@ -112,7 +110,14 @@ def prelu(x):
 def bnrelu(name, x, is_training=True, scale=True):
 
   with tf.variable_scope(name):
-    x = batch_norm(x, scale=True, is_training=is_training)
+    x = batch_norm(x,
+                   decay=0.9,
+                   center=True,
+                   scale=True,
+                   epsilon=1e-5,
+                   updates_collections=None,
+                   is_training=is_training)
+
     x = tf.nn.relu(x)
 
   return x
