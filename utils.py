@@ -32,7 +32,7 @@ def conv_op(name, x, outChannel, kw, kh, dw=1, dh=1,
       weight_decay = tf.mul(tf.nn.l2_loss(kernel), wd, name='weight_loss')
       tf.add_to_collection('reg_losses', weight_decay)    
 
-    return out
+  return out
 
 def mlpconv(name, x, outChannel, kw, kh, dw=1, dh=1, is_training=True):
 
@@ -95,7 +95,7 @@ def res_op(name, x, outChannel, kw, kh, d,
 
     out = tf.add(x, identity)
 
-    return out
+  return out
  
 def prelu(x):
 
@@ -107,17 +107,51 @@ def prelu(x):
 
   return out
 
-def bnrelu(name, x, is_training=True, scale=True):
+def bnrelu(name, x, is_training=True, center=True, scale=True):
 
   with tf.variable_scope(name):
     x = batch_norm(x,
                    decay=0.9,
                    center=True,
                    scale=True,
-                   epsilon=1e-5,
-                   updates_collections=None,
                    is_training=is_training)
 
     x = tf.nn.relu(x)
 
   return x
+
+def dense_op(name, x, n_unit, k, kw, kd, is_training):
+  
+  with tf.variable_scope(name):
+    for i in range(0, n_unit):
+      _name = 'unit_%i' % i
+      out = _dense_basic_unit(_name, x, k, kw, kd, is_training)
+      x = tf.concat(3, [out, x])
+
+  n_map = x.get_shape().as_list()[-1]
+
+  return out, n_map
+
+def transition_op(name, x, k, is_training):
+  '''
+  x: input
+  k: numbers of feature-map
+  '''
+  with tf.variable_scope(name):
+    x = bnrelu('BN-Relu', x, is_training)
+    x = conv_op('conv', x, k, 1, 1, b_initializer=None, padding='VALID')
+    x = tf.nn.avg_pool(x, 
+                       ksize=[1, 2, 2, 1], 
+                       strides=[1, 2, 2, 1], 
+                       padding='VALID')
+  return x
+
+def _dense_basic_unit(name, x, k, kw, kd, is_training):
+
+  with tf.variable_scope(name):
+    out = bnrelu('BN-Relu_0', x, is_training)
+    out = conv_op('dim_reduction', out, 4*k, 1, 1, b_initializer=None)
+    out = bnrelu('BN-Relu_1', out, is_training)
+    out = conv_op('conv', out, k, kw, kd, b_initializer=None)
+
+  return out

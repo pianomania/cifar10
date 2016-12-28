@@ -69,7 +69,7 @@ class Input(object):
     '''
     
     x = self._flippen(x)
-    x = self._brighten_and_contrast(x)
+    #x = self._brighten_and_contrast(x)
     x = self._normalize(x)
 
     for i in xrange(x.shape[0]):

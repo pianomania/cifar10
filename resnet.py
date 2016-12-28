@@ -4,9 +4,9 @@ from utils import res_op, conv_op, bnrelu
 
 class ResNet(object):
 
-  def __init__(self, nstack=3, is_training=True):
+  def __init__(self, hps):
   
-    self.nstack = nstack
+    self.nstack = hps['nstack']
     
     self.is_training=tf.placeholder(dtype=tf.bool, shape=[])
     self.image = tf.placeholder(dtype=tf.float32, shape=[None, 32, 32, 3])
