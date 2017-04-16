@@ -2,7 +2,7 @@
 This Repo contains CNN architectures i.e. NIN[1], ResNet[2], DenseNet[3] <br />
 All Networks are initialized according to [4] <br />
 # Results
-![result](./assets/results) <br />
+![result](./assets/results.png) <br />
 
 # References <br />
 [[1]Network in Network](https://arxiv.org/abs/1312.4400) <br />
